@@ -1,40 +1,23 @@
-/**
- * IotWebConf06MqttApp.ino -- IotWebConf is an ESP8266/ESP32
- *   non blocking WiFi/AP web configuration library for Arduino.
- *   https://github.com/prampec/IotWebConf 
- *
- * Copyright (C) 2020 Balazs Kelemen <prampec+arduino@gmail.com>
- *
- * This software may be modified and distributed under the terms
- * of the MIT license.  See the LICENSE file for details.
+/*
+ * Board: ESP32 Dev Module 
  */
+ 
+/**
+   Based on
+   IotWebConf06MqttApp.ino -- IotWebConf is an ESP8266/ESP32
+     non blocking WiFi/AP web configuration library for Arduino.
+     https://github.com/prampec/IotWebConf
+*/
 
 /**
- * Example: MQTT Demo Application
- * Description:
- *   All IotWebConf specific aspects of this example are described in
- *   previous examples, so please get familiar with IotWebConf before
- *   starting this example. So nothing new will be explained here, 
- *   but a complete demo application will be built.
- *   It is also expected from the reader to have a basic knowledge over
- *   MQTT to understand this code.
- *   
- *   This example starts an MQTT client with the configured
- *   connection settings.
- *   Will post the status changes of the D2 pin in channel "test/status".
- *   Receives messages appears in channel "test/action", and writes them to serial.
- *   This example also provides the firmware update option.
- *   (See previous examples for more details!)
- * 
- * Software setup for this example:
- *   This example utilizes Joel Gaehwiler's MQTT library.
- *   https://github.com/256dpi/arduino-mqtt
- * 
- * Hardware setup for this example:
- *   - An LED is attached to LED_BUILTIN pin with setup On=LOW.
- *   - [Optional] A push button is attached to pin D2, the other leg of the
- *     button should be attached to GND.
- */
+   Software setup for this example:
+     https://github.com/256dpi/arduino-mqtt
+
+   Hardware setup for this example:
+     - An LED is attached to LED_BUILTIN pin with setup On=LOW.
+     - [Optional] A push button is attached to pin D2, the other leg of the
+       button should be attached to GND.
+*/
 
 #include <MQTT.h>
 #include <IotWebConf.h>
@@ -44,21 +27,21 @@
 const char thingName[] = "testThing";
 
 // -- Initial password to connect to the Thing, when it creates an own Access Point.
-const char wifiInitialApPassword[] = "smrtTHNG8266";
+const char wifiInitialApPassword[] = "Averbuch";
 
 #define STRING_LEN 128
 
 // -- Configuration specific key. The value should be modified if config structure was changed.
-#define CONFIG_VERSION "mqt1"
+#define CONFIG_VERSION "mqt2"
 
 // -- When CONFIG_PIN is pulled to ground on startup, the Thing will use the initial
 //      password to buld an AP. (E.g. in case of lost password)
-#define CONFIG_PIN D2
+#define CONFIG_PIN 3 // D2
 
 // -- Status indicator pin.
 //      First it will light up (kept LOW), on Wifi connection it will blink,
 //      when connected to the Wifi it will turn off (kept HIGH).
-#define STATUS_PIN LED_BUILTIN
+#define STATUS_PIN 2 //LED_BUILTIN
 
 // -- Method declarations.
 void handleRoot();
@@ -78,6 +61,7 @@ MQTTClient mqttClient;
 char mqttServerValue[STRING_LEN];
 char mqttUserNameValue[STRING_LEN];
 char mqttUserPasswordValue[STRING_LEN];
+char mqttTopicValue[STRING_LEN];
 
 IotWebConf iotWebConf(thingName, &dnsServer, &server, wifiInitialApPassword, CONFIG_VERSION);
 // -- You can also use namespace formats e.g.: iotwebconf::ParameterGroup
@@ -85,6 +69,8 @@ IotWebConfParameterGroup mqttGroup = IotWebConfParameterGroup("mqtt", "MQTT conf
 IotWebConfTextParameter mqttServerParam = IotWebConfTextParameter("MQTT server", "mqttServer", mqttServerValue, STRING_LEN);
 IotWebConfTextParameter mqttUserNameParam = IotWebConfTextParameter("MQTT user", "mqttUser", mqttUserNameValue, STRING_LEN);
 IotWebConfPasswordParameter mqttUserPasswordParam = IotWebConfPasswordParameter("MQTT password", "mqttPass", mqttUserPasswordValue, STRING_LEN);
+IotWebConfTextParameter mqttTopicParam = IotWebConfTextParameter("MQTT topic", "mqttTopic", mqttTopicValue, STRING_LEN);
+
 
 bool needMqttConnect = false;
 bool needReset = false;
@@ -92,7 +78,8 @@ int pinState = HIGH;
 unsigned long lastReport = 0;
 unsigned long lastMqttConnectionAttempt = 0;
 
-void setup() 
+
+void setup()
 {
   Serial.begin(115200);
   Serial.println();
@@ -101,6 +88,7 @@ void setup()
   mqttGroup.addItem(&mqttServerParam);
   mqttGroup.addItem(&mqttUserNameParam);
   mqttGroup.addItem(&mqttUserPasswordParam);
+  mqttGroup.addItem(&mqttTopicParam);
 
   iotWebConf.setStatusPin(STATUS_PIN);
   iotWebConf.setConfigPin(CONFIG_PIN);
@@ -116,25 +104,29 @@ void setup()
     mqttServerValue[0] = '\0';
     mqttUserNameValue[0] = '\0';
     mqttUserPasswordValue[0] = '\0';
+    mqttTopicValue[0] = '\0';
   }
 
   // -- Set up required URL handlers on the web server.
   server.on("/", handleRoot);
-  server.on("/config", []{ iotWebConf.handleConfig(); });
-  server.onNotFound([](){ iotWebConf.handleNotFound(); });
+  server.on("/config", [] { iotWebConf.handleConfig(); });
+  server.onNotFound([]() {
+    iotWebConf.handleNotFound();
+  });
 
   mqttClient.begin(mqttServerValue, net);
   mqttClient.onMessage(mqttMessageReceived);
-  
+
   Serial.println("Ready.");
 }
 
-void loop() 
+void loop()
 {
+
   // -- doLoop should be called as frequently as possible.
   iotWebConf.doLoop();
   mqttClient.loop();
-  
+
   if (needMqttConnect)
   {
     if (connectMqtt())
@@ -167,8 +159,8 @@ void loop()
 }
 
 /**
- * Handle web requests to "/" path.
- */
+   Handle web requests to "/" path.
+*/
 void handleRoot()
 {
   // -- Let IotWebConf test and handle captive portal requests.
@@ -228,15 +220,31 @@ bool connectMqtt() {
     lastMqttConnectionAttempt = now;
     return false;
   }
-  Serial.println("Connected!");
 
-  mqttClient.subscribe("test/action");
+
+  char localIP[20];
+  sprintf(localIP, "%d.%d.%d.%d", net.localIP()[0], net.localIP()[1], net.localIP()[2], net.localIP()[3] );
+  char remoteIP[20];
+  sprintf(remoteIP, "%d.%d.%d.%d", net.remoteIP()[0], net.remoteIP()[1], net.remoteIP()[2], net.remoteIP()[3] );
+
+  String m = "Connected mqtt client '";
+  m +=  thingName ;
+  m += "' localIP=" ;
+  m += localIP;
+  m += " remoteIP=" ;
+  m += remoteIP;
+
+  Serial.println(m);
+
+  mqttClient.subscribe(mqttTopicValue);
+
+  mqttClient.publish(mqttTopicValue, m);
   return true;
 }
 
 /*
-// -- This is an alternative MQTT connection method.
-bool connectMqtt() {
+  // -- This is an alternative MQTT connection method.
+  bool connectMqtt() {
   Serial.println("Connecting to MQTT server...");
   while (!connectMqttOptions()) {
     iotWebConf.delay(1000);
@@ -245,7 +253,7 @@ bool connectMqtt() {
 
   mqttClient.subscribe("test/action");
   return true;
-}
+  }
 */
 
 bool connectMqttOptions()
